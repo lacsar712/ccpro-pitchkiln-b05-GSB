@@ -11,7 +11,15 @@ class ResinLotAdmin(admin.ModelAdmin):
 
 @admin.register(FireHearth)
 class FireHearthAdmin(admin.ModelAdmin):
-    list_display = ("id", "lane", "tag", "resinGrade", "phase")
+    list_display = (
+        "id",
+        "lane",
+        "tag",
+        "resinGrade",
+        "phase",
+        "openWindowStart",
+        "openWindowEnd",
+    )
     list_filter = ("phase", "lane")
     search_fields = ("tag", "resinGrade")
 

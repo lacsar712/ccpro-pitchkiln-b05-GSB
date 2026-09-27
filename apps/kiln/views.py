@@ -8,9 +8,15 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import OpenCookRunForm, PhaseChangeForm, ResinLotForm, SoftPointProbeForm
+from .forms import (
+    CookRunUpdateForm,
+    OpenCookRunForm,
+    PhaseChangeForm,
+    ResinLotForm,
+    SoftPointProbeForm,
+)
 from .models import CookRun, FireHearth, ResinLot
-from .services.floor_rules import change_hearth_phase
+from .services.floor_rules import OPENABLE_PHASES, change_hearth_phase
 
 
 def _wants_htmx(request):
@@ -50,13 +56,21 @@ def _drawer_context(hearth):
     probes = []
     if open_run:
         probes = list(open_run.probes.order_by("-sampledAt", "-id"))
+    # 按灶过滤后的值守，按开灶时刻升序复算，供顺序对齐核对。
+    run_rows = [
+        (run, CookRunUpdateForm(instance=run, run=run))
+        for run in hearth.runs_in_opening_order()
+    ]
+    can_open = hearth.phase in OPENABLE_PHASES
     return {
         "hearth": hearth,
         "open_run": open_run,
         "probes": probes,
+        "run_rows": run_rows,
+        "can_open_run": can_open,
         "phase_form": PhaseChangeForm(hearth=hearth),
         "probe_form": SoftPointProbeForm() if open_run else None,
-        "open_run_form": OpenCookRunForm(hearth=hearth) if open_run is None else None,
+        "open_run_form": OpenCookRunForm(hearth=hearth) if can_open else None,
     }
 
 
@@ -151,10 +165,31 @@ def open_run(request, pk):
         run = form.save(commit=False)
         run.hearth = hearth
         run.save()
-        if hearth.phase == FireHearth.PHASE_COLD:
-            hearth.phase = FireHearth.PHASE_CHARGING
-            hearth.save(update_fields=["phase"])
+        # 相位联锁由表单强制：冷灶在 is_valid() 即被拦截，不会再自动放行。
         messages.success(request, "新值守已开灶")
+    else:
+        for errs in form.errors.values():
+            for e in errs:
+                messages.error(request, e)
+            break
+
+    if _wants_htmx(request):
+        hearth.refresh_from_db()
+        resp = render(request, "floor/_drawer.html", _drawer_context(hearth))
+        resp["HX-Trigger"] = "floor-refresh"
+        return resp
+    return redirect(f"/?hearth={pk}")
+
+
+@login_required
+@require_POST
+def edit_run(request, pk, run_pk):
+    hearth = get_object_or_404(FireHearth, pk=pk)
+    run = get_object_or_404(CookRun, pk=run_pk, hearth=hearth)
+    form = CookRunUpdateForm(request.POST, instance=run, run=run)
+    if form.is_valid():
+        form.save()
+        messages.success(request, "开灶时刻已更新")
     else:
         for errs in form.errors.values():
             for e in errs:

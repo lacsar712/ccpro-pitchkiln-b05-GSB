@@ -608,6 +608,63 @@ body {
 
 .back-link:hover { text-decoration: underline; }
 
+.run-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.run-row {
+  border: 1px solid rgba(232, 121, 12, 0.25);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.run-row.open { border-left: 3px solid var(--ember); }
+.run-row.closed { opacity: 0.7; border-left: 3px solid var(--steel); }
+
+.run-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.run-line .when { font-weight: 700; }
+.run-line .run-lot { color: var(--cinder); }
+.run-line .run-state {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--steel);
+}
+
+.run-row.open .run-state { color: var(--ember); }
+
+.inline-edit {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  align-items: center;
+}
+
+.inline-edit .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-sm {
+  font-size: 0.72rem;
+  padding: 0.25rem 0.55rem;
+  white-space: nowrap;
+}
+
+.cold-blocked { color: var(--steel); }
+
 @media (max-width: 900px) {
   .ember-gate { grid-template-columns: 1fr; }
   .floor-grid { margin-right: 0; }

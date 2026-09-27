@@ -1,4 +1,13 @@
+from datetime import time
+
 from django.db import models
+from django.utils import timezone
+
+
+def _parse_24h(value):
+    """允许窗默认值：把 'HH:MM' 解析为 time。"""
+    hh, mm = value.split(":")
+    return time(int(hh), int(mm))
 
 
 class ResinLot(models.Model):
@@ -39,6 +48,12 @@ class FireHearth(models.Model):
         choices=PHASE_CHOICES,
         default=PHASE_COLD,
     )
+    openWindowStart = models.TimeField(
+        "允许开灶起", default=_parse_24h("05:00")
+    )
+    openWindowEnd = models.TimeField(
+        "允许开灶止", default=_parse_24h("22:00")
+    )
 
     class Meta:
         ordering = ["lane", "tag"]
@@ -55,6 +70,19 @@ class FireHearth(models.Model):
             .order_by("-openedAt", "-id")
             .first()
         )
+
+    def is_within_open_window(self, opened_at):
+        """开灶时刻（按本地时钟的时:分）是否落在灶台允许窗，支持跨午夜。"""
+        local_t = timezone.localtime(opened_at).time()
+        start, end = self.openWindowStart, self.openWindowEnd
+        if start <= end:
+            return start <= local_t <= end
+        # 跨午夜窗，如 22:00–05:00：起之后或止之前都算窗内。
+        return local_t >= start or local_t <= end
+
+    def runs_in_opening_order(self):
+        """按灶过滤后的值守，按开灶时刻复算的对齐顺序（升序，同时刻 id 兜底）。"""
+        return self.runs.order_by("openedAt", "id")
 
 
 class CookRun(models.Model):

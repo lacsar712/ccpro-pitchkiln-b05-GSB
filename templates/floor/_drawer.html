@@ -7,7 +7,10 @@
     <span class="badge phase-{{ hearth.phase }}">{{ hearth.get_phase_display }}</span>
   </header>
 
-  <p class="drawer-meta">品级标签 · {{ hearth.resinGrade }}</p>
+  <p class="drawer-meta">
+    品级标签 · {{ hearth.resinGrade }}
+    <br>允许开灶窗 · 每日 {{ hearth.openWindowStart|time:"H:i" }}–{{ hearth.openWindowEnd|time:"H:i" }}（跨午夜窗含两端）
+  </p>
 
   {% if open_run %}
   <section class="drawer-block">
@@ -54,10 +57,40 @@
       <button type="submit" class="btn-ember">写入探针</button>
     </form>
   </section>
-  {% else %}
+  {% endif %}
+
+  <section class="drawer-block">
+    <h3>本灶值守顺序</h3>
+    <p class="hint">按灶过滤后按开灶时刻升序复算；未收灶值守须排在最末，否则即乱序。</p>
+    <ol class="run-order">
+      {% for r, edit_form in run_rows %}
+      <li class="run-row {% if r.closedAt %}closed{% else %}open{% endif %}">
+        <div class="run-line">
+          <span class="mono when">{{ r.openedAt|date:"Y-m-d H:i" }}</span>
+          <span class="run-lot">{{ r.resinLot.lotCode }}</span>
+          <span class="run-state">{% if r.closedAt %}已收灶 {{ r.closedAt|date:"m-d H:i" }}{% else %}未收灶{% endif %}</span>
+        </div>
+        <form method="post"
+              action="{% url 'edit_run' hearth.pk r.pk %}"
+              class="inline-edit"
+              hx-post="{% url 'edit_run' hearth.pk r.pk %}"
+              hx-target="#hearth-drawer"
+              hx-swap="innerHTML">
+          {% csrf_token %}
+          {{ edit_form.openedAt }}
+          <button type="submit" class="btn-ghost btn-sm">改开灶时刻</button>
+        </form>
+      </li>
+      {% empty %}
+      <li class="empty">该灶暂无值守。</li>
+      {% endfor %}
+    </ol>
+  </section>
+
   <section class="drawer-block">
     <h3>开新值守</h3>
-    <p class="hint">冷灶或空灶需绑定来脂批后开灶。</p>
+    {% if can_open_run %}
+    <p class="hint">装料 / 升温 / 保温 / 出胶 相位可开灶；时刻须在允许窗内，且不得晚于其它未收灶值守。</p>
     <form method="post" action="{% url 'open_run' hearth.pk %}"
           class="stack-form"
           hx-post="{% url 'open_run' hearth.pk %}"
@@ -67,8 +100,10 @@
       {{ open_run_form.as_p }}
       <button type="submit" class="btn-ember">开灶</button>
     </form>
+    {% else %}
+    <p class="hint cold-blocked">当前为冷灶，禁止开灶；请先切到 装料 / 升温 / 保温 / 出胶 相位。</p>
+    {% endif %}
   </section>
-  {% endif %}
 
   <section class="drawer-block">
     <h3>切换相位</h3>
