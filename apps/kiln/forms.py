@@ -75,7 +75,18 @@ class SoftPointProbeForm(forms.ModelForm):
             self.initial["sampledAt"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
 
 
-class OpenCookRunForm(forms.ModelForm):
+class _OpenedAtMixin:
+    def _set_opened_input_formats(self):
+        self.fields["openedAt"].input_formats = [
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+        ]
+
+
+class OpenCookRunForm(_OpenedAtMixin, forms.ModelForm):
+    """开新值守：冷灶 / 窗外 / 同灶乱序均由 validate_run_opening 拦截。"""
+
     class Meta:
         model = CookRun
         fields = ["resinLot", "openedAt", "targetSoftPointC"]
@@ -93,17 +104,33 @@ class OpenCookRunForm(forms.ModelForm):
     def __init__(self, *args, hearth=None, **kwargs):
         self.hearth = hearth
         super().__init__(*args, **kwargs)
-        self.fields["openedAt"].input_formats = [
-            "%Y-%m-%dT%H:%M",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-        ]
+        self._set_opened_input_formats()
         self.fields["resinLot"].queryset = ResinLot.objects.all()
         if not self.is_bound:
             self.initial["openedAt"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
+        # 把灶台挂到未保存的值守实例上：ModelForm 校验会调用实例 clean()，
+        # 相位 / 允许窗 / 同灶乱序由模型层统一拦截（新建与更新同一路径）。
+        if hearth is not None:
+            self.instance.hearth = hearth
 
-    def clean(self):
-        cleaned = super().clean()
-        if self.hearth is not None and self.hearth.open_run() is not None:
-            raise forms.ValidationError("该灶已有进行中的值守，请先收灶再开新灶。")
-        return cleaned
+
+class ChangeOpenedAtForm(_OpenedAtMixin, forms.ModelForm):
+    """更新既有未收灶值守的开灶时刻，受同一窗 / 相位 / 乱序约束。"""
+
+    class Meta:
+        model = CookRun
+        fields = ["openedAt"]
+        widgets = {
+            "openedAt": forms.DateTimeInput(
+                attrs={"class": "field", "type": "datetime-local"},
+                format="%Y-%m-%dT%H:%M",
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._set_opened_input_formats()
+        if not self.is_bound and self.instance and self.instance.pk:
+            self.initial["openedAt"] = timezone.localtime(
+                self.instance.openedAt
+            ).strftime("%Y-%m-%dT%H:%M")

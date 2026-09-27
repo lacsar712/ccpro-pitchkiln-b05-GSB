@@ -8,7 +8,13 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import OpenCookRunForm, PhaseChangeForm, ResinLotForm, SoftPointProbeForm
+from .forms import (
+    ChangeOpenedAtForm,
+    OpenCookRunForm,
+    PhaseChangeForm,
+    ResinLotForm,
+    SoftPointProbeForm,
+)
 from .models import CookRun, FireHearth, ResinLot
 from .services.floor_rules import change_hearth_phase
 
@@ -23,7 +29,8 @@ def _hearths_for_board():
             "runs",
             queryset=CookRun.objects.filter(closedAt__isnull=True)
             .select_related("resinLot")
-            .prefetch_related("probes"),
+            .prefetch_related("probes")
+            .order_by("-openedAt", "-id"),
             to_attr="open_runs_cache",
         )
     ).order_by("lane", "tag")
@@ -46,17 +53,26 @@ def _board_context():
 
 
 def _drawer_context(hearth):
-    open_run = hearth.open_run()
+    # 一灶可同时有多个未收灶值守；按开灶时刻从晚到早，顺序可按 openedAt 复算对齐
+    open_runs = list(
+        hearth.runs.filter(closedAt__isnull=True)
+        .select_related("resinLot")
+        .prefetch_related("probes")
+        .order_by("-openedAt", "-id")
+    )
+    open_run = open_runs[0] if open_runs else None
     probes = []
     if open_run:
         probes = list(open_run.probes.order_by("-sampledAt", "-id"))
     return {
         "hearth": hearth,
+        "open_runs": open_runs,
         "open_run": open_run,
         "probes": probes,
+        "can_open": hearth.phase in FireHearth.OPENABLE_PHASES,
         "phase_form": PhaseChangeForm(hearth=hearth),
         "probe_form": SoftPointProbeForm() if open_run else None,
-        "open_run_form": OpenCookRunForm(hearth=hearth) if open_run is None else None,
+        "open_run_form": OpenCookRunForm(hearth=hearth),
     }
 
 
@@ -121,17 +137,27 @@ def change_phase(request, pk):
 @require_POST
 def add_probe(request, pk):
     hearth = get_object_or_404(FireHearth, pk=pk)
-    open_run = hearth.open_run()
-    if open_run is None:
+    # 默认记到最晚开灶的未收灶值守；多值守时可用 run_id 指定同灶其它未收灶值守
+    target_run = hearth.open_run()
+    run_id = request.POST.get("run_id")
+    if run_id:
+        target_run = (
+            hearth.runs.filter(pk=run_id, closedAt__isnull=True)
+            .select_related("resinLot")
+            .first()
+        )
+    if target_run is None:
         messages.error(request, "没有进行中的值守，无法登记探针")
         return redirect(f"/?hearth={pk}")
 
     form = SoftPointProbeForm(request.POST)
     if form.is_valid():
         probe = form.save(commit=False)
-        probe.run = open_run
+        probe.run = target_run
         probe.save()
-        messages.success(request, f"已登记探针 {probe.softPointC}℃")
+        messages.success(
+            request, f"已为 {target_run.openedAt:%m-%d %H:%M} 值守登记探针 {probe.softPointC}℃"
+        )
     else:
         messages.error(request, "探针登记失败，请检查输入")
 
@@ -148,12 +174,10 @@ def open_run(request, pk):
     hearth = get_object_or_404(FireHearth, pk=pk)
     form = OpenCookRunForm(request.POST, hearth=hearth)
     if form.is_valid():
+        # 冷灶已在表单层拒绝；非冷相位开灶不改变当前相位（联锁而非自动跳相）
         run = form.save(commit=False)
         run.hearth = hearth
         run.save()
-        if hearth.phase == FireHearth.PHASE_COLD:
-            hearth.phase = FireHearth.PHASE_CHARGING
-            hearth.save(update_fields=["phase"])
         messages.success(request, "新值守已开灶")
     else:
         for errs in form.errors.values():
@@ -171,17 +195,51 @@ def open_run(request, pk):
 
 @login_required
 @require_POST
-def close_run(request, pk):
+def reschedule_run(request, pk, run_pk):
+    """更新开灶时刻：与新建同一套窗 / 相位 / 乱序约束，出胶灶也不例外。"""
     hearth = get_object_or_404(FireHearth, pk=pk)
-    open_run = hearth.open_run()
-    if open_run is None:
+    run = get_object_or_404(CookRun, pk=run_pk, hearth=hearth, closedAt__isnull=True)
+    form = ChangeOpenedAtForm(request.POST, instance=run)
+    if form.is_valid():
+        form.save()
+        messages.success(request, f"开灶时刻已改为 {run.openedAt:%Y-%m-%d %H:%M}")
+    else:
+        for errs in form.errors.values():
+            for e in errs:
+                messages.error(request, e)
+            break
+
+    if _wants_htmx(request):
+        hearth.refresh_from_db()
+        resp = render(request, "floor/_drawer.html", _drawer_context(hearth))
+        resp["HX-Trigger"] = "floor-refresh"
+        return resp
+    return redirect(f"/?hearth={pk}")
+
+
+@login_required
+@require_POST
+def close_run(request, pk, run_pk=None):
+    hearth = get_object_or_404(FireHearth, pk=pk)
+    target_run = hearth.open_run()
+    if run_pk is not None:
+        target_run = (
+            hearth.runs.filter(pk=run_pk, closedAt__isnull=True)
+            .select_related("resinLot")
+            .first()
+        )
+    if target_run is None:
         messages.error(request, "没有进行中的值守可收灶")
     else:
-        open_run.closedAt = timezone.now()
-        open_run.save(update_fields=["closedAt"])
-        hearth.phase = FireHearth.PHASE_COLD
-        hearth.save(update_fields=["phase"])
-        messages.success(request, "值守已收灶，灶台回冷灶")
+        target_run.closedAt = timezone.now()
+        target_run.save(update_fields=["closedAt"])
+        # 仍有其它未收灶值守时保持当前相位；全部收完才回冷灶
+        if hearth.runs.filter(closedAt__isnull=True).exists():
+            messages.success(request, "该值守已收灶，灶上仍有其它进行中值守")
+        else:
+            hearth.phase = FireHearth.PHASE_COLD
+            hearth.save(update_fields=["phase"])
+            messages.success(request, "值守已收灶，灶台回冷灶")
 
     if _wants_htmx(request):
         hearth.refresh_from_db()

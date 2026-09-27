@@ -11,9 +11,14 @@ class ResinLotAdmin(admin.ModelAdmin):
 
 @admin.register(FireHearth)
 class FireHearthAdmin(admin.ModelAdmin):
-    list_display = ("id", "lane", "tag", "resinGrade", "phase")
+    list_display = ("id", "lane", "tag", "resinGrade", "phase", "window_display")
     list_filter = ("phase", "lane")
     search_fields = ("tag", "resinGrade")
+    fields = ("lane", "tag", "resinGrade", "phase", "cookWindowStart", "cookWindowEnd")
+
+    @admin.display(description="灶允许窗")
+    def window_display(self, obj):
+        return f"{obj.cookWindowStart:%H:%M}–{obj.cookWindowEnd:%H:%M}"
 
 
 @admin.register(CookRun)

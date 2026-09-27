@@ -617,3 +617,51 @@ body {
   .feed-layout { grid-template-columns: 1fr; }
   .lane-row { grid-template-columns: 40px 1fr; }
 }
+
+/* 一灶多值守：叠灶标记、值守列表、行内小表单 */
+.tile-runs {
+  font-size: 0.68rem;
+  color: var(--ember, #e07a3f);
+  letter-spacing: 0.05em;
+}
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.run-item {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.run-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.inline-form {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0;
+}
+
+.inline-form .field {
+  width: auto;
+  min-width: 11rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.hint.warn {
+  color: #e0a23f;
+}

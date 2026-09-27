@@ -21,6 +21,9 @@
         {% if open %}
         <span class="tile-temp mono">目标 {{ open.targetSoftPointC }}℃</span>
         <span class="tile-lot">{{ open.resinLot.lotCode }}</span>
+        {% if h.open_runs_cache|length > 1 %}
+        <span class="tile-runs mono">叠灶 ×{{ h.open_runs_cache|length }}</span>
+        {% endif %}
         {% else %}
         <span class="tile-temp mono muted">无开灶</span>
         {% endif %}

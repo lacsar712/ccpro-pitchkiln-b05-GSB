@@ -7,28 +7,50 @@
     <span class="badge phase-{{ hearth.phase }}">{{ hearth.get_phase_display }}</span>
   </header>
 
-  <p class="drawer-meta">品级标签 · {{ hearth.resinGrade }}</p>
+  <p class="drawer-meta">
+    品级标签 · {{ hearth.resinGrade }}　·　灶允许窗
+    <span class="mono">{{ hearth.cookWindowStart|time:"H:i" }}–{{ hearth.cookWindowEnd|time:"H:i" }}</span>
+    （跨午夜照常开窗）
+  </p>
 
-  {% if open_run %}
+  {% if open_runs %}
   <section class="drawer-block">
-    <h3>进行中值守</h3>
-    <dl class="kv">
-      <dt>来脂批</dt><dd>{{ open_run.resinLot.lotCode }}</dd>
-      <dt>来源</dt><dd>{{ open_run.resinLot.originPlace }}</dd>
-      <dt>开灶</dt><dd class="mono">{{ open_run.openedAt|date:"Y-m-d H:i" }}</dd>
-      <dt>目标软化点</dt><dd class="mono">{{ open_run.targetSoftPointC }} ℃</dd>
-    </dl>
-    <form method="post" action="{% url 'close_run' hearth.pk %}"
-          hx-post="{% url 'close_run' hearth.pk %}"
-          hx-target="#hearth-drawer"
-          hx-swap="innerHTML">
-      {% csrf_token %}
-      <button type="submit" class="btn-ghost">收灶回冷灶</button>
-    </form>
+    <h3>未收灶值守（{{ open_runs|length }}）· 按开灶时刻从晚到早</h3>
+    <ol class="run-list">
+      {% for r in open_runs %}
+      <li class="run-item">
+        <dl class="kv">
+          <dt>开灶</dt><dd class="mono">{{ r.openedAt|date:"Y-m-d H:i" }}</dd>
+          <dt>来脂批</dt><dd>{{ r.resinLot.lotCode }} · {{ r.resinLot.originPlace }}</dd>
+          <dt>目标软化点</dt><dd class="mono">{{ r.targetSoftPointC }} ℃</dd>
+          <dt>探针</dt><dd class="mono">{{ r.probes.all|length }} 条{% if forloop.first %} · 最新值守{% endif %}</dd>
+        </dl>
+        <div class="run-actions">
+          <form method="post" action="{% url 'reschedule_run' hearth.pk r.pk %}"
+                class="inline-form"
+                hx-post="{% url 'reschedule_run' hearth.pk r.pk %}"
+                hx-target="#hearth-drawer" hx-swap="innerHTML">
+            {% csrf_token %}
+            <input type="datetime-local" class="field" name="openedAt"
+                   value="{{ r.openedAt|date:'Y-m-d\TH:i' }}" step="60">
+            <button type="submit" class="btn-ghost">改开灶时刻</button>
+          </form>
+          <form method="post" action="{% url 'close_run_one' hearth.pk r.pk %}"
+                class="inline-form"
+                hx-post="{% url 'close_run_one' hearth.pk r.pk %}"
+                hx-target="#hearth-drawer" hx-swap="innerHTML">
+            {% csrf_token %}
+            <button type="submit" class="btn-ghost">收此灶</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    <p class="hint">同灶新建值守的开灶时刻须早于最晚值守；改时刻不得越过其它值守（双向乱序均禁止）。</p>
   </section>
 
   <section class="drawer-block">
-    <h3>软化点探针时间线</h3>
+    <h3>软化点探针时间线（最新值守）</h3>
     <ol class="probe-timeline">
       {% for p in probes %}
       <li class="{% if p.softPointC <= 95 %}ok{% else %}hot{% endif %}">
@@ -44,20 +66,32 @@
 
   <section class="drawer-block">
     <h3>登记探针</h3>
+    <p class="hint">出胶灶仍可补探针；默认补到最新值守，也可指定同灶其它未收灶值守。</p>
     <form method="post" action="{% url 'add_probe' hearth.pk %}"
           class="stack-form"
           hx-post="{% url 'add_probe' hearth.pk %}"
           hx-target="#hearth-drawer"
           hx-swap="innerHTML">
       {% csrf_token %}
+      {% if open_runs|length > 1 %}
+      <p><label>补到值守：
+        <select name="run_id" class="field">
+          {% for r in open_runs %}
+          <option value="{{ r.pk }}">{{ r.openedAt|date:"m-d H:i" }} · {{ r.resinLot.lotCode }}</option>
+          {% endfor %}
+        </select>
+      </label></p>
+      {% endif %}
       {{ probe_form.as_p }}
       <button type="submit" class="btn-ember">写入探针</button>
     </form>
   </section>
-  {% else %}
+  {% endif %}
+
+  {% if can_open %}
   <section class="drawer-block">
     <h3>开新值守</h3>
-    <p class="hint">冷灶或空灶需绑定来脂批后开灶。</p>
+    <p class="hint">开灶时刻须落在灶允许窗，且不得晚于最晚开灶的未收灶值守。</p>
     <form method="post" action="{% url 'open_run' hearth.pk %}"
           class="stack-form"
           hx-post="{% url 'open_run' hearth.pk %}"
@@ -68,11 +102,16 @@
       <button type="submit" class="btn-ember">开灶</button>
     </form>
   </section>
+  {% else %}
+  <section class="drawer-block">
+    <h3>开新值守</h3>
+    <p class="hint warn">冷灶禁止开新值守。请先在下方把相位切到装料 / 升温 / 保温 / 出胶，再开灶。</p>
+  </section>
   {% endif %}
 
   <section class="drawer-block">
     <h3>切换相位</h3>
-    <p class="hint">进入「出胶」须当前值守至少一条探针 ≤95℃。</p>
+    <p class="hint">进入「出胶」须最新值守至少一条探针 ≤95℃。</p>
     <form method="post" action="{% url 'change_phase' hearth.pk %}"
           class="stack-form"
           hx-post="{% url 'change_phase' hearth.pk %}"
